@@ -1,7 +1,8 @@
-
 'use client'
 import React, { useState, useEffect } from 'react';
 import { CheckSquare, Square, BookOpen, Target, Calendar, TrendingUp, Edit3, Save, X } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 
 const GateTracker = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -10,6 +11,11 @@ const GateTracker = () => {
   const [notes, setNotes] = useState({});
   const [editingNote, setEditingNote] = useState(null);
   const [tempNote, setTempNote] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // User ID (in real app, this would come from authentication)
+  const userId = 'demo-user'; // Replace with actual user ID later
 
   // TypeScript interface for subject data
   interface SubjectData {
@@ -24,14 +30,119 @@ const GateTracker = () => {
     return typeof obj === 'object' && obj !== null && 'weightage' in obj;
   };
 
-  // Load data from memory on component mount
+  // Load data from Firestore on component mount
   useEffect(() => {
-    // In a real app, this would load from localStorage, but we'll use component state
-    const savedCompleted = new Set();
-    const savedNotes = {};
-    setCompletedConcepts(savedCompleted);
-    setNotes(savedNotes);
+    loadProgress();
+    
+    // Set up real-time listener for progress updates
+    const unsubscribe = onSnapshot(doc(db, 'users', userId), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setCompletedConcepts(new Set(data.completedConcepts || []));
+        setNotes(data.notes || {});
+      }
+      setIsLoading(false);
+    });
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
+
+  // Load progress from Firestore
+  const loadProgress = async () => {
+    try {
+      setIsLoading(true);
+      const docRef = doc(db, 'users', userId);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setCompletedConcepts(new Set(data.completedConcepts || []));
+        setNotes(data.notes || {});
+      }
+    } catch (error) {
+      console.error('Error loading progress:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Save progress to Firestore
+  const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
+    try {
+      setIsSaving(true);
+      await setDoc(doc(db, 'users', userId), {
+        completedConcepts: Array.from(newCompletedConcepts),
+        notes: newNotes,
+        lastUpdated: new Date(),
+        totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
+        completedCount: newCompletedConcepts.size
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error saving progress:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Auto-save when data changes
+  useEffect(() => {
+    if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
+      const timeoutId = setTimeout(() => {
+        saveProgress();
+      }, 1000); // Auto-save after 1 second of inactivity
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [completedConcepts, notes, isLoading]);
+
+  const toggleConcept = (subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    const newCompleted = new Set(completedConcepts);
+    
+    if (newCompleted.has(conceptId)) {
+      newCompleted.delete(conceptId);
+    } else {
+      newCompleted.add(conceptId);
+    }
+    
+    setCompletedConcepts(newCompleted);
+    // Auto-save will trigger via useEffect
+  };
+
+  const saveNote = (subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    const newNotes = { ...notes };
+    newNotes[conceptId] = tempNote;
+    setNotes(newNotes);
+    setEditingNote(null);
+    setTempNote('');
+    // Auto-save will trigger via useEffect
+  };
+
+  const startEditingNote = (subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    setEditingNote(conceptId);
+    setTempNote(notes[conceptId] || '');
+  };
+
+  const cancelEditingNote = () => {
+    setEditingNote(null);
+    setTempNote('');
+  };
+
+  // Add loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your progress...</p>
+        </div>
+      </div>
+    );
+  }
+
 
   const subjects = {
     'Programming & Data Structures': {
@@ -481,39 +592,6 @@ const GateTracker = () => {
     }
   };
 
-  const toggleConcept = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    const newCompleted = new Set(completedConcepts);
-    
-    if (newCompleted.has(conceptId)) {
-      newCompleted.delete(conceptId);
-    } else {
-      newCompleted.add(conceptId);
-    }
-    
-    setCompletedConcepts(newCompleted);
-  };
-
-  const saveNote = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    const newNotes = { ...notes };
-    newNotes[conceptId] = tempNote;
-    setNotes(newNotes);
-    setEditingNote(null);
-    setTempNote('');
-  };
-
-  const startEditingNote = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    setEditingNote(conceptId);
-    setTempNote(notes[conceptId] || '');
-  };
-
-  const cancelEditingNote = () => {
-    setEditingNote(null);
-    setTempNote('');
-  };
-
   const calculateProgress = () => {
     let totalConcepts = 0;
     let completedCount = 0;
@@ -735,57 +813,74 @@ const GateTracker = () => {
     </div>
   );
 
-  return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="max-w-6xl mx-auto p-4">
-        <header className="bg-white shadow-md rounded-lg p-6 mb-6">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
-          <p className="text-gray-600">Track your progress across all subjects and concepts</p>
-        </header>
-
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="border-b">
-            <nav className="flex space-x-8 px-6">
-              <button
-                onClick={() => setActiveTab('overview')}
-                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === 'overview' 
-                    ? 'border-blue-500 text-blue-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center">
-                  <BookOpen className="w-4 h-4 mr-2" />
-                  Overview
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('chapters')}
-                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === 'chapters' 
-                    ? 'border-blue-500 text-blue-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center">
-                  <Target className="w-4 h-4 mr-2" />
-                  Chapters
-                </div>
-              </button>
-            </nav>
+return (
+  <div className="min-h-screen bg-gray-100">
+    <div className="max-w-6xl mx-auto p-4">
+      <header className="bg-white shadow-md rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
+            <p className="text-gray-600">Track your progress across all subjects and concepts</p>
           </div>
-
-          <div className="p-6">
-            {activeTab === 'overview' ? <OverviewTab /> : <ChaptersTab />}
+          <div className="text-sm text-gray-500">
+            {isSaving ? (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+                Saving...
+              </div>
+            ) : (
+              <div className="flex items-center text-green-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                Saved
+              </div>
+            )}
           </div>
         </div>
+      </header>
 
-        <footer className="mt-8 text-center text-gray-500 text-sm">
-          <p>Stay consistent and achieve your GATE 2026 goals! 🎯</p>
-        </footer>
+      <div className="bg-white rounded-lg shadow-md">
+        <div className="border-b">
+          <nav className="flex space-x-8 px-6">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'overview' 
+                  ? 'border-blue-500 text-blue-600' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <BookOpen className="w-4 h-4 mr-2" />
+                Overview
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('chapters')}
+              className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'chapters' 
+                  ? 'border-blue-500 text-blue-600' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Target className="w-4 h-4 mr-2" />
+                Chapters
+              </div>
+            </button>
+          </nav>
+        </div>
+
+        <div className="p-6">
+          {activeTab === 'overview' ? <OverviewTab /> : <ChaptersTab />}
+        </div>
       </div>
+
+      <footer className="mt-8 text-center text-gray-500 text-sm">
+        <p>Stay consistent and achieve your GATE 2026 goals! 🎯</p>
+      </footer>
     </div>
-  );
+  </div>
+);
 };
 
 export default GateTracker;
