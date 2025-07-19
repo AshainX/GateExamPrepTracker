@@ -160,16 +160,23 @@ const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes =
   }
 };
 
-  // Optimized auto-save with longer delay
-  useEffect(() => {
-    if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
-      const timeoutId = setTimeout(() => {
-        saveProgress();
-      }, 3000); // Increased to 3 seconds to reduce API calls
-
-      return () => clearTimeout(timeoutId);
+// FIXED CODE (prevents auto-save during note editing)
+// Optimized auto-save with longer delay
+useEffect(() => {
+  if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
+    // Don't auto-save if user is currently editing a note
+    if (editingNote !== null) {
+      return;
     }
-  }, [completedConcepts, notes, isLoading]);
+    
+    const timeoutId = setTimeout(() => {
+      saveProgress();
+    }, 3000); // Increased to 3 seconds to reduce API calls
+
+    return () => clearTimeout(timeoutId);
+  }
+}, [completedConcepts, notes, isLoading, editingNote]);
+
 
   // Optimized toggle concept with immediate save for important actions
   const toggleConcept = (subjectName, conceptIndex) => {
