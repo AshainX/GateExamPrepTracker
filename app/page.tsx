@@ -1,3 +1,4 @@
+
 'use client'
 import React, { useState, useEffect } from 'react';
 import { CheckSquare, Square, BookOpen, Target, Calendar, TrendingUp, Edit3, Save, X } from 'lucide-react';
@@ -9,6 +10,19 @@ const GateTracker = () => {
   const [notes, setNotes] = useState({});
   const [editingNote, setEditingNote] = useState(null);
   const [tempNote, setTempNote] = useState('');
+
+  // TypeScript interface for subject data
+  interface SubjectData {
+    completed: number;
+    total: number;
+    percentage: number;
+    weightage: number;
+  }
+
+  // Helper function to check if object has weightage property
+  const hasWeightage = (obj: unknown): obj is SubjectData => {
+    return typeof obj === 'object' && obj !== null && 'weightage' in obj;
+  };
 
   // Load data from memory on component mount
   useEffect(() => {
@@ -580,33 +594,34 @@ const GateTracker = () => {
 
       <div className="grid gap-4">
         <h3 className="text-xl font-semibold text-gray-800">Subject-wise Progress</h3>
-        {Object.entries(progress.subjects)
-          .sort((a, b) => b[1].weightage - a[1].weightage)
-          .map(([subjectName, subjectData]) => (
-            <div key={subjectName} className="bg-white p-4 rounded-lg shadow-md border">
-              <div className="flex justify-between items-center mb-3">
-                <div>
-                  <h4 className="font-semibold text-gray-800">{subjectName}</h4>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subjects[subjectName].priority)}`}>
-                      {subjects[subjectName].priority} Priority
-                    </span>
-                    <span className="text-sm text-gray-600">{subjectData.weightage} marks</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold text-blue-600">{subjectData.percentage}%</div>
-                  <div className="text-sm text-gray-500">{subjectData.completed}/{subjectData.total}</div>
-                </div>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-                  style={{ width: `${subjectData.percentage}%` }}
-                ></div>
-              </div>
-            </div>
-          ))}
+{Object.entries(progress.subjects)
+  .filter((entry): entry is [string, SubjectData] => hasWeightage(entry[1]))
+  .sort((a, b) => b[1].weightage - a[1].weightage)
+  .map(([subjectName, subjectData]) => (
+    <div key={subjectName} className="bg-white p-4 rounded-lg shadow-md border">
+      <div className="flex justify-between items-center mb-3">
+        <div>
+          <h4 className="font-semibold text-gray-800">{subjectName}</h4>
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subjects[subjectName].priority)}`}>
+              {subjects[subjectName].priority} Priority
+            </span>
+            <span className="text-sm text-gray-600">{subjectData.weightage} marks</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-lg font-bold text-blue-600">{subjectData.percentage}%</div>
+          <div className="text-sm text-gray-500">{subjectData.completed}/{subjectData.total}</div>
+        </div>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div 
+          className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
+          style={{ width: `${subjectData.percentage}%` }}
+        ></div>
+      </div>
+    </div>
+  ))}
       </div>
     </div>
   );
@@ -683,7 +698,7 @@ const GateTracker = () => {
                                 value={tempNote}
                                 onChange={(e) => setTempNote(e.target.value)}
                                 className="w-full p-2 border rounded-md resize-vertical"
-                                rows="3"
+                                rows={3}
                                 placeholder="Add your notes here..."
                               />
                               <div className="flex gap-2 mt-2">
