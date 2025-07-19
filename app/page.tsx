@@ -13,9 +13,10 @@ const GateTracker = () => {
   const [tempNote, setTempNote] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
 
   // User ID (in real app, this would come from authentication)
-  const userId = 'demo-user'; // Replace with actual user ID later
+  const userId = 'demo-user';
 
   // TypeScript interface for subject data
   interface SubjectData {
@@ -30,72 +31,147 @@ const GateTracker = () => {
     return typeof obj === 'object' && obj !== null && 'weightage' in obj;
   };
 
-  // Load data from Firestore on component mount
+  // Local Storage functions
+  const saveToLocalStorage = (data) => {
+    try {
+      localStorage.setItem('gateTracker-cache', JSON.stringify({
+        ...data,
+        timestamp: Date.now()
+      }));
+    } catch (error) {
+      console.warn('Failed to save to localStorage:', error);
+    }
+  };
+
+  const loadFromLocalStorage = () => {
+    try {
+      const cached = localStorage.getItem('gateTracker-cache');
+      if (cached) {
+        const data = JSON.parse(cached);
+        // Use cache if it's less than 5 minutes old
+        if (Date.now() - data.timestamp < 5 * 60 * 1000) {
+          return data;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load from localStorage:', error);
+    }
+    return null;
+  };
+
+  // Online/Offline detection
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    setIsOnline(navigator.onLine);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Load data with caching
+  useEffect(() => {
+    // Load from cache first for instant display
+    const cachedData = loadFromLocalStorage();
+    if (cachedData) {
+      setCompletedConcepts(new Set(cachedData.completedConcepts || []));
+      setNotes(cachedData.notes || {});
+      setIsLoading(false);
+    }
+
+    // Then load fresh data from Firebase
     loadProgress();
     
-    // Set up real-time listener for progress updates
     const unsubscribe = onSnapshot(doc(db, 'users', userId), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
-        setCompletedConcepts(new Set(data.completedConcepts || []));
-        setNotes(data.notes || {});
+        const newData = {
+          completedConcepts: data.completedConcepts || [],
+          notes: data.notes || {}
+        };
+        
+        setCompletedConcepts(new Set(newData.completedConcepts));
+        setNotes(newData.notes);
+        saveToLocalStorage(newData); // Cache the fresh data
       }
       setIsLoading(false);
     });
 
-    // Cleanup listener on unmount
     return () => unsubscribe();
   }, []);
 
   // Load progress from Firestore
   const loadProgress = async () => {
+    if (!isOnline) return;
+    
     try {
-      setIsLoading(true);
       const docRef = doc(db, 'users', userId);
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setCompletedConcepts(new Set(data.completedConcepts || []));
-        setNotes(data.notes || {});
+        const newData = {
+          completedConcepts: data.completedConcepts || [],
+          notes: data.notes || {}
+        };
+        setCompletedConcepts(new Set(newData.completedConcepts));
+        setNotes(newData.notes);
+        saveToLocalStorage(newData);
       }
     } catch (error) {
       console.error('Error loading progress:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  // Save progress to Firestore
-  const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
-    try {
-      setIsSaving(true);
-      await setDoc(doc(db, 'users', userId), {
-        completedConcepts: Array.from(newCompletedConcepts),
-        notes: newNotes,
-        lastUpdated: new Date(),
-        totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
-        completedCount: newCompletedConcepts.size
-      }, { merge: true });
-    } catch (error) {
-      console.error('Error saving progress:', error);
-    } finally {
-      setIsSaving(false);
-    }
+const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
+  const optimizedData = {
+    completedConcepts: Array.from(newCompletedConcepts),
+    notes: Object.fromEntries(
+      Object.entries(newNotes).filter(([, value]) => 
+        typeof value === 'string' && value.trim() !== ''
+      ) // Only save non-empty notes
+    ),
+    lastUpdated: new Date(),
+    totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
+    completedCount: newCompletedConcepts.size
   };
+  
+  // Always save to cache first (instant)
+  saveToLocalStorage(optimizedData);
+  
+  // Only try Firebase if online
+  if (!isOnline) {
+    console.log('Offline - data saved locally');
+    return;
+  }
+  
+  try {
+    setIsSaving(true);
+    await setDoc(doc(db, 'users', userId), optimizedData, { merge: true });
+  } catch (error) {
+    console.error('Error saving to Firebase:', error);
+  } finally {
+    setIsSaving(false);
+  }
+};
 
-  // Auto-save when data changes
+  // Optimized auto-save with longer delay
   useEffect(() => {
     if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
       const timeoutId = setTimeout(() => {
         saveProgress();
-      }, 1000); // Auto-save after 1 second of inactivity
+      }, 3000); // Increased to 3 seconds to reduce API calls
 
       return () => clearTimeout(timeoutId);
     }
   }, [completedConcepts, notes, isLoading]);
 
+  // Optimized toggle concept with immediate save for important actions
   const toggleConcept = (subjectName, conceptIndex) => {
     const conceptId = `${subjectName}-${conceptIndex}`;
     const newCompleted = new Set(completedConcepts);
@@ -107,7 +183,8 @@ const GateTracker = () => {
     }
     
     setCompletedConcepts(newCompleted);
-    // Auto-save will trigger via useEffect
+    
+
   };
 
   const saveNote = (subjectName, conceptIndex) => {
@@ -117,7 +194,8 @@ const GateTracker = () => {
     setNotes(newNotes);
     setEditingNote(null);
     setTempNote('');
-    // Auto-save will trigger via useEffect
+    
+
   };
 
   const startEditingNote = (subjectName, conceptIndex) => {
@@ -131,18 +209,39 @@ const GateTracker = () => {
     setTempNote('');
   };
 
-  // Add loading state
+  // Progressive loading screen
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your progress...</p>
+      <div className="min-h-screen bg-gray-100">
+        <div className="max-w-6xl mx-auto p-4">
+          <header className="bg-white shadow-md rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
+                <p className="text-gray-600">Loading your progress...</p>
+              </div>
+              <div className="flex items-center text-blue-600">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+                Loading...
+              </div>
+            </div>
+          </header>
+          
+          {/* Show skeleton loading instead of blank screen */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
+              <div className="space-y-3">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-16 bg-gray-200 rounded"></div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
-
 
   const subjects = {
     'Programming & Data Structures': {
@@ -672,34 +771,34 @@ const GateTracker = () => {
 
       <div className="grid gap-4">
         <h3 className="text-xl font-semibold text-gray-800">Subject-wise Progress</h3>
-{Object.entries(progress.subjects)
-  .filter((entry): entry is [string, SubjectData] => hasWeightage(entry[1]))
-  .sort((a, b) => b[1].weightage - a[1].weightage)
-  .map(([subjectName, subjectData]) => (
-    <div key={subjectName} className="bg-white p-4 rounded-lg shadow-md border">
-      <div className="flex justify-between items-center mb-3">
-        <div>
-          <h4 className="font-semibold text-gray-800">{subjectName}</h4>
-          <div className="flex items-center gap-2">
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subjects[subjectName].priority)}`}>
-              {subjects[subjectName].priority} Priority
-            </span>
-            <span className="text-sm text-gray-600">{subjectData.weightage} marks</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-lg font-bold text-blue-600">{subjectData.percentage}%</div>
-          <div className="text-sm text-gray-500">{subjectData.completed}/{subjectData.total}</div>
-        </div>
-      </div>
-      <div className="w-full bg-gray-200 rounded-full h-2">
-        <div 
-          className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-          style={{ width: `${subjectData.percentage}%` }}
-        ></div>
-      </div>
-    </div>
-  ))}
+        {Object.entries(progress.subjects)
+          .filter((entry): entry is [string, SubjectData] => hasWeightage(entry[1]))
+          .sort((a, b) => b[1].weightage - a[1].weightage)
+          .map(([subjectName, subjectData]) => (
+            <div key={subjectName} className="bg-white p-4 rounded-lg shadow-md border">
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <h4 className="font-semibold text-gray-800">{subjectName}</h4>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subjects[subjectName].priority)}`}>
+                      {subjects[subjectName].priority} Priority
+                    </span>
+                    <span className="text-sm text-gray-600">{subjectData.weightage} marks</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold text-blue-600">{subjectData.percentage}%</div>
+                  <div className="text-sm text-gray-500">{subjectData.completed}/{subjectData.total}</div>
+                </div>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
+                  style={{ width: `${subjectData.percentage}%` }}
+                ></div>
+              </div>
+            </div>
+          ))}
       </div>
     </div>
   );
@@ -813,74 +912,79 @@ const GateTracker = () => {
     </div>
   );
 
-return (
-  <div className="min-h-screen bg-gray-100">
-    <div className="max-w-6xl mx-auto p-4">
-      <header className="bg-white shadow-md rounded-lg p-6 mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
-            <p className="text-gray-600">Track your progress across all subjects and concepts</p>
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <div className="max-w-6xl mx-auto p-4">
+        <header className="bg-white shadow-md rounded-lg p-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
+              <p className="text-gray-600">Track your progress across all subjects and concepts</p>
+            </div>
+            <div className="text-sm text-gray-500">
+              {!isOnline ? (
+                <div className="flex items-center text-orange-600">
+                  <div className="w-2 h-2 bg-orange-500 rounded-full mr-2"></div>
+                  Offline
+                </div>
+              ) : isSaving ? (
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+                  Syncing...
+                </div>
+              ) : (
+                <div className="flex items-center text-green-600">
+                  <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                  Synced
+                </div>
+              )}
+            </div>
           </div>
-          <div className="text-sm text-gray-500">
-            {isSaving ? (
-              <div className="flex items-center">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
-                Saving...
-              </div>
-            ) : (
-              <div className="flex items-center text-green-600">
-                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                Saved
-              </div>
-            )}
+        </header>
+
+        <div className="bg-white rounded-lg shadow-md">
+          <div className="border-b">
+            <nav className="flex space-x-8 px-6">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'overview' 
+                    ? 'border-blue-500 text-blue-600' 
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center">
+                  <BookOpen className="w-4 h-4 mr-2" />
+                  Overview
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('chapters')}
+                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'chapters' 
+                    ? 'border-blue-500 text-blue-600' 
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center">
+                  <Target className="w-4 h-4 mr-2" />
+                  Chapters
+                </div>
+              </button>
+            </nav>
+          </div>
+
+          <div className="p-6">
+            {activeTab === 'overview' ? <OverviewTab /> : <ChaptersTab />}
           </div>
         </div>
-      </header>
 
-      <div className="bg-white rounded-lg shadow-md">
-        <div className="border-b">
-          <nav className="flex space-x-8 px-6">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'overview' 
-                  ? 'border-blue-500 text-blue-600' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <BookOpen className="w-4 h-4 mr-2" />
-                Overview
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('chapters')}
-              className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'chapters' 
-                  ? 'border-blue-500 text-blue-600' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <Target className="w-4 h-4 mr-2" />
-                Chapters
-              </div>
-            </button>
-          </nav>
-        </div>
-
-        <div className="p-6">
-          {activeTab === 'overview' ? <OverviewTab /> : <ChaptersTab />}
-        </div>
+        <footer className="mt-8 text-center text-gray-500 text-sm">
+          <p>Stay consistent and achieve your GATE 2026 goals! 🎯</p>
+        </footer>
       </div>
-
-      <footer className="mt-8 text-center text-gray-500 text-sm">
-        <p>Stay consistent and achieve your GATE 2026 goals! 🎯</p>
-      </footer>
     </div>
-  </div>
-);
+  );
 };
 
 export default GateTracker;
