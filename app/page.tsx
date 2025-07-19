@@ -1,11 +1,10 @@
 'use client'
 import React, { useState, useEffect } from 'react';
-import { CheckSquare, Square, BookOpen, Target, Calendar, TrendingUp, Edit3, Save, X } from 'lucide-react';
+import { CheckSquare, Square, BookOpen, Target, Calendar, TrendingUp, Edit3, Save, X, Play, Pause, ArrowLeft, Music } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 
 const GateTracker = () => {
-  const [activeTab, setActiveTab] = useState('overview');
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [completedConcepts, setCompletedConcepts] = useState(new Set());
   const [notes, setNotes] = useState({});
@@ -48,7 +47,6 @@ const GateTracker = () => {
       const cached = localStorage.getItem('gateTracker-cache');
       if (cached) {
         const data = JSON.parse(cached);
-        // Use cache if it's less than 5 minutes old
         if (Date.now() - data.timestamp < 5 * 60 * 1000) {
           return data;
         }
@@ -76,7 +74,6 @@ const GateTracker = () => {
 
   // Load data with caching
   useEffect(() => {
-    // Load from cache first for instant display
     const cachedData = loadFromLocalStorage();
     if (cachedData) {
       setCompletedConcepts(new Set(cachedData.completedConcepts || []));
@@ -84,7 +81,6 @@ const GateTracker = () => {
       setIsLoading(false);
     }
 
-    // Then load fresh data from Firebase
     loadProgress();
     
     const unsubscribe = onSnapshot(doc(db, 'users', userId), (doc) => {
@@ -97,7 +93,7 @@ const GateTracker = () => {
         
         setCompletedConcepts(new Set(newData.completedConcepts));
         setNotes(newData.notes);
-        saveToLocalStorage(newData); // Cache the fresh data
+        saveToLocalStorage(newData);
       }
       setIsLoading(false);
     });
@@ -128,57 +124,51 @@ const GateTracker = () => {
     }
   };
 
-const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
-  const optimizedData = {
-    completedConcepts: Array.from(newCompletedConcepts),
-    notes: Object.fromEntries(
-      Object.entries(newNotes).filter(([, value]) => 
-        typeof value === 'string' && value.trim() !== ''
-      ) // Only save non-empty notes
-    ),
-    lastUpdated: new Date(),
-    totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
-    completedCount: newCompletedConcepts.size
-  };
-  
-  // Always save to cache first (instant)
-  saveToLocalStorage(optimizedData);
-  
-  // Only try Firebase if online
-  if (!isOnline) {
-    console.log('Offline - data saved locally');
-    return;
-  }
-  
-  try {
-    setIsSaving(true);
-    await setDoc(doc(db, 'users', userId), optimizedData, { merge: true });
-  } catch (error) {
-    console.error('Error saving to Firebase:', error);
-  } finally {
-    setIsSaving(false);
-  }
-};
-
-// FIXED CODE (prevents auto-save during note editing)
-// Optimized auto-save with longer delay
-useEffect(() => {
-  if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
-    // Don't auto-save if user is currently editing a note
-    if (editingNote !== null) {
+  const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
+    const optimizedData = {
+      completedConcepts: Array.from(newCompletedConcepts),
+      notes: Object.fromEntries(
+        Object.entries(newNotes).filter(([, value]) => 
+          typeof value === 'string' && value.trim() !== ''
+        )
+      ),
+      lastUpdated: new Date(),
+      totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
+      completedCount: newCompletedConcepts.size
+    };
+    
+    saveToLocalStorage(optimizedData);
+    
+    if (!isOnline) {
+      console.log('Offline - data saved locally');
       return;
     }
     
-    const timeoutId = setTimeout(() => {
-      saveProgress();
-    }, 3000); // Increased to 3 seconds to reduce API calls
+    try {
+      setIsSaving(true);
+      await setDoc(doc(db, 'users', userId), optimizedData, { merge: true });
+    } catch (error) {
+      console.error('Error saving to Firebase:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-    return () => clearTimeout(timeoutId);
-  }
-}, [completedConcepts, notes, isLoading, editingNote]);
+  // Auto-save logic
+  useEffect(() => {
+    if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
+      if (editingNote !== null) {
+        return;
+      }
+      
+      const timeoutId = setTimeout(() => {
+        saveProgress();
+      }, 3000);
 
+      return () => clearTimeout(timeoutId);
+    }
+  }, [completedConcepts, notes, isLoading, editingNote]);
 
-  // Optimized toggle concept with immediate save for important actions
   const toggleConcept = (subjectName, conceptIndex) => {
     const conceptId = `${subjectName}-${conceptIndex}`;
     const newCompleted = new Set(completedConcepts);
@@ -190,8 +180,6 @@ useEffect(() => {
     }
     
     setCompletedConcepts(newCompleted);
-    
-
   };
 
   const saveNote = (subjectName, conceptIndex) => {
@@ -201,8 +189,6 @@ useEffect(() => {
     setNotes(newNotes);
     setEditingNote(null);
     setTempNote('');
-    
-
   };
 
   const startEditingNote = (subjectName, conceptIndex) => {
@@ -216,35 +202,12 @@ useEffect(() => {
     setTempNote('');
   };
 
-  // Progressive loading screen
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-100">
-        <div className="max-w-6xl mx-auto p-4">
-          <header className="bg-white shadow-md rounded-lg p-6 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
-                <p className="text-gray-600">Loading your progress...</p>
-              </div>
-              <div className="flex items-center text-blue-600">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
-                Loading...
-              </div>
-            </div>
-          </header>
-          
-          {/* Show skeleton loading instead of blank screen */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="animate-pulse">
-              <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-gray-200 rounded"></div>
-                ))}
-              </div>
-            </div>
-          </div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+          <p className="text-white">Loading your study playlists...</p>
         </div>
       </div>
     );
@@ -254,6 +217,7 @@ useEffect(() => {
     'Programming & Data Structures': {
       weightage: 11.5,
       priority: 'Very High',
+      color: 'from-purple-600 to-blue-600',
       concepts: [
         'Arrays and Dynamic Arrays',
         'Array Rotations and Manipulations',
@@ -290,6 +254,7 @@ useEffect(() => {
     'Computer Organization & Architecture': {
       weightage: 11.25,
       priority: 'Very High',
+      color: 'from-red-600 to-pink-600',
       concepts: [
         'Number Systems and Base Conversions',
         'Binary Arithmetic and Overflow',
@@ -326,6 +291,7 @@ useEffect(() => {
     'General Aptitude': {
       weightage: 14.75,
       priority: 'Very High',
+      color: 'from-green-600 to-teal-600',
       concepts: [
         'Percentages and Applications',
         'Profit and Loss Problems',
@@ -362,6 +328,7 @@ useEffect(() => {
     'Operating Systems': {
       weightage: 8.5,
       priority: 'High',
+      color: 'from-orange-600 to-yellow-600',
       concepts: [
         'Process Management and Process States',
         'Process Control Block (PCB)',
@@ -398,6 +365,7 @@ useEffect(() => {
     'Computer Networks': {
       weightage: 9.0,
       priority: 'High',
+      color: 'from-blue-600 to-indigo-600',
       concepts: [
         'OSI Reference Model',
         'TCP/IP Protocol Suite',
@@ -437,6 +405,7 @@ useEffect(() => {
     'Discrete Mathematics': {
       weightage: 9.0,
       priority: 'High',
+      color: 'from-indigo-600 to-purple-600',
       concepts: [
         'Propositional Logic and Truth Tables',
         'Logical Connectives and Equivalences',
@@ -473,6 +442,7 @@ useEffect(() => {
     'Theory of Computation': {
       weightage: 8.0,
       priority: 'High',
+      color: 'from-pink-600 to-red-600',
       concepts: [
         'Finite Automata (DFA) Construction',
         'Non-deterministic Finite Automata (NFA)',
@@ -509,6 +479,7 @@ useEffect(() => {
     'Database Management Systems': {
       weightage: 6.75,
       priority: 'Medium',
+      color: 'from-teal-600 to-green-600',
       concepts: [
         'Database System Architecture',
         'ER Model and ER Diagrams',
@@ -547,6 +518,7 @@ useEffect(() => {
     'Algorithms': {
       weightage: 6.25,
       priority: 'Medium',
+      color: 'from-yellow-600 to-orange-600',
       concepts: [
         'Algorithm Analysis Fundamentals',
         'Time and Space Complexity',
@@ -585,6 +557,7 @@ useEffect(() => {
     'Engineering Mathematics': {
       weightage: 6.0,
       priority: 'Medium',
+      color: 'from-purple-600 to-pink-600',
       concepts: [
         'Linear Algebra Fundamentals',
         'Matrices and Matrix Operations',
@@ -623,6 +596,7 @@ useEffect(() => {
     'Digital Logic': {
       weightage: 5.0,
       priority: 'Medium',
+      color: 'from-cyan-600 to-blue-600',
       concepts: [
         'Number Systems and Conversions',
         'Binary Arithmetic Operations',
@@ -661,6 +635,7 @@ useEffect(() => {
     'Compiler Design': {
       weightage: 4.75,
       priority: 'Low',
+      color: 'from-gray-600 to-slate-600',
       concepts: [
         'Compiler Architecture and Phases',
         'Lexical Analysis Fundamentals',
@@ -734,264 +709,290 @@ useEffect(() => {
 
   const progress = calculateProgress();
 
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'Very High': return 'text-red-600 bg-red-50';
-      case 'High': return 'text-orange-600 bg-orange-50';
-      case 'Medium': return 'text-yellow-600 bg-yellow-50';
-      case 'Low': return 'text-green-600 bg-green-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
+  const getWeightageColor = (weightage) => {
+    if (weightage >= 10) return 'text-red-400';
+    if (weightage >= 8) return 'text-orange-400';
+    if (weightage >= 6) return 'text-yellow-400';
+    return 'text-green-400';
   };
 
-  const OverviewTab = () => (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-6 rounded-lg">
-        <h2 className="text-2xl font-bold mb-4">GATE CSE 2026 Progress</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white bg-opacity-20 p-4 rounded-lg">
-            <div className="flex items-center mb-2">
-              <Target className="w-5 h-5 mr-2" />
-              <span className="font-medium">Overall Progress</span>
-            </div>
-            <div className="text-3xl font-bold">{progress.overall}%</div>
-            <div className="text-sm opacity-90">{progress.totalCompleted}/{progress.totalConcepts} concepts</div>
+  // Main grid view (like Spotify home)
+  const MainView = () => (
+    <div className="min-h-screen bg-black text-white">
+      {/* Top Header */}
+      <div className="sticky top-0 bg-black bg-opacity-90 backdrop-blur-md z-10 px-8 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
+              Prepration Tracker - GATE 2026 !!
+            </h1>
+            <p className="text-gray-400 mt-1">Sabubele 6 Ghanta de bujhilu!!</p>
           </div>
-          <div className="bg-white bg-opacity-20 p-4 rounded-lg">
-            <div className="flex items-center mb-2">
-              <Calendar className="w-5 h-5 mr-2" />
-              <span className="font-medium">Target Date</span>
-            </div>
-            <div className="text-xl font-bold">Feb 2026</div>
-            <div className="text-sm opacity-90">197 days remaining</div>
-          </div>
-          <div className="bg-white bg-opacity-20 p-4 rounded-lg">
-            <div className="flex items-center mb-2">
-              <TrendingUp className="w-5 h-5 mr-2" />
-              <span className="font-medium">Target Score</span>
-            </div>
-            <div className="text-xl font-bold">90+ marks</div>
-            <div className="text-sm opacity-90">AIR 1-500</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4">
-        <h3 className="text-xl font-semibold text-gray-800">Subject-wise Progress</h3>
-        {Object.entries(progress.subjects)
-          .filter((entry): entry is [string, SubjectData] => hasWeightage(entry[1]))
-          .sort((a, b) => b[1].weightage - a[1].weightage)
-          .map(([subjectName, subjectData]) => (
-            <div key={subjectName} className="bg-white p-4 rounded-lg shadow-md border">
-              <div className="flex justify-between items-center mb-3">
-                <div>
-                  <h4 className="font-semibold text-gray-800">{subjectName}</h4>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subjects[subjectName].priority)}`}>
-                      {subjects[subjectName].priority} Priority
-                    </span>
-                    <span className="text-sm text-gray-600">{subjectData.weightage} marks</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold text-blue-600">{subjectData.percentage}%</div>
-                  <div className="text-sm text-gray-500">{subjectData.completed}/{subjectData.total}</div>
-                </div>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-                  style={{ width: `${subjectData.percentage}%` }}
-                ></div>
-              </div>
-            </div>
-          ))}
-      </div>
-    </div>
-  );
-
-  const ChaptersTab = () => (
-    <div className="space-y-4">
-      <h3 className="text-xl font-semibold text-gray-800">All Subjects</h3>
-      <div className="grid gap-4">
-        {Object.entries(subjects)
-          .sort((a, b) => b[1].weightage - a[1].weightage)
-          .map(([subjectName, subject]) => (
-            <div key={subjectName} className="bg-white rounded-lg shadow-md border overflow-hidden">
-              <div 
-                className="p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-                onClick={() => setSelectedSubject(selectedSubject === subjectName ? null : subjectName)}
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-semibold text-gray-800">{subjectName}</h4>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(subject.priority)}`}>
-                        {subject.priority} Priority
-                      </span>
-                      <span className="text-sm text-gray-600">{subject.weightage} marks</span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600">
-                      {progress.subjects[subjectName].percentage}%
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {progress.subjects[subjectName].completed}/{progress.subjects[subjectName].total}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {selectedSubject === subjectName && (
-                <div className="p-4 border-t">
-                  <div className="space-y-3">
-                    {subject.concepts.map((concept, index) => {
-                      const conceptId = `${subjectName}-${index}`;
-                      const isCompleted = completedConcepts.has(conceptId);
-                      const isEditingThis = editingNote === conceptId;
-                      const hasNote = notes[conceptId] && notes[conceptId].length > 0;
-                      
-                      return (
-                        <div key={index} className="border rounded-lg p-3 bg-gray-50">
-                          <div className="flex items-center justify-between mb-2">
-                            <div 
-                              className="flex items-center cursor-pointer flex-1"
-                              onClick={() => toggleConcept(subjectName, index)}
-                            >
-                              {isCompleted ? 
-                                <CheckSquare className="w-5 h-5 text-green-600 mr-3" /> :
-                                <Square className="w-5 h-5 text-gray-400 mr-3" />
-                              }
-                              <span className={`${isCompleted ? 'line-through text-gray-500' : 'text-gray-800'} font-medium`}>
-                                {concept}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => startEditingNote(subjectName, index)}
-                              className={`ml-2 p-1 rounded ${hasNote ? 'text-blue-600 bg-blue-100' : 'text-gray-400 hover:text-blue-600'}`}
-                              title={hasNote ? 'Edit note' : 'Add note'}
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          </div>
-                          
-                          {isEditingThis ? (
-                            <div className="mt-2">
-                              <textarea
-                                value={tempNote}
-                                onChange={(e) => setTempNote(e.target.value)}
-                                className="w-full p-2 border rounded-md resize-vertical"
-                                rows={3}
-                                placeholder="Add your notes here..."
-                              />
-                              <div className="flex gap-2 mt-2">
-                                <button
-                                  onClick={() => saveNote(subjectName, index)}
-                                  className="flex items-center px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
-                                >
-                                  <Save className="w-3 h-3 mr-1" />
-                                  Save
-                                </button>
-                                <button
-                                  onClick={cancelEditingNote}
-                                  className="flex items-center px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
-                                >
-                                  <X className="w-3 h-3 mr-1" />
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : hasNote && (
-                            <div className="mt-2 p-2 bg-blue-50 rounded text-sm text-gray-700 whitespace-pre-wrap">
-                              {notes[conceptId]}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="max-w-6xl mx-auto p-4">
-        <header className="bg-white shadow-md rounded-lg p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">GATE CSE 2026 Preparation Tracker</h1>
-              <p className="text-gray-600">Track your progress across all subjects and concepts</p>
-            </div>
-            <div className="text-sm text-gray-500">
+          <div className="flex items-center space-x-4">
+            <div className="text-sm">
               {!isOnline ? (
-                <div className="flex items-center text-orange-600">
-                  <div className="w-2 h-2 bg-orange-500 rounded-full mr-2"></div>
+                <div className="flex items-center text-red-400">
+                  <div className="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
                   Offline
                 </div>
               ) : isSaving ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+                <div className="flex items-center text-yellow-400">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400 mr-2"></div>
                   Syncing...
                 </div>
               ) : (
-                <div className="flex items-center text-green-600">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                <div className="flex items-center text-green-400">
+                  <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
                   Synced
                 </div>
               )}
             </div>
           </div>
-        </header>
+        </div>
+      </div>
 
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="border-b">
-            <nav className="flex space-x-8 px-6">
-              <button
-                onClick={() => setActiveTab('overview')}
-                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === 'overview' 
-                    ? 'border-blue-500 text-blue-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center">
-                  <BookOpen className="w-4 h-4 mr-2" />
-                  Overview
-                </div>
-              </button>
-              <button
-                onClick={() => setActiveTab('chapters')}
-                className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === 'chapters' 
-                    ? 'border-blue-500 text-blue-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center">
-                  <Target className="w-4 h-4 mr-2" />
-                  Chapters
-                </div>
-              </button>
-            </nav>
+      {/* Overall Stats */}
+      <div className="px-8 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-6 rounded-xl">
+            <div className="flex items-center mb-2">
+              <Target className="w-6 h-6 mr-2" />
+              <span className="font-medium">Overall Progress</span>
+            </div>
+            <div className="text-3xl font-bold">{progress.overall}%</div>
+            <div className="text-sm opacity-90">{progress.totalCompleted}/{progress.totalConcepts} concepts mastered</div>
           </div>
-
-          <div className="p-6">
-            {activeTab === 'overview' ? <OverviewTab /> : <ChaptersTab />}
+          <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 rounded-xl">
+            <div className="flex items-center mb-2">
+              <Calendar className="w-6 h-6 mr-2" />
+              <span className="font-medium">Target Date</span>
+            </div>
+            <div className="text-2xl font-bold">Feb 2026</div>
+            <div className="text-sm opacity-90">197 days remaining</div>
+          </div>
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 rounded-xl">
+            <div className="flex items-center mb-2">
+              <TrendingUp className="w-6 h-6 mr-2" />
+              <span className="font-medium">Target Score</span>
+            </div>
+            <div className="text-2xl font-bold">90+ marks</div>
+            <div className="text-sm opacity-90">AIR 1-500</div>
+          </div>
+          <div className="bg-gradient-to-r from-orange-600 to-red-600 p-6 rounded-xl">
+            <div className="flex items-center mb-2">
+              <Music className="w-6 h-6 mr-2" />
+              <span className="font-medium">Study Sessions</span>
+            </div>
+            <div className="text-2xl font-bold">{Object.keys(subjects).length}</div>
+            <div className="text-sm opacity-90">Subject playlists</div>
           </div>
         </div>
 
-        <footer className="mt-8 text-center text-gray-500 text-sm">
-          <p>Stay consistent and achieve your GATE 2026 goals! 🎯</p>
-        </footer>
+        {/* Subject Grid */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-6 text-white">Your Study Playlists</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {Object.entries(subjects)
+              .sort((a, b) => b[1].weightage - a[1].weightage)
+              .map(([subjectName, subject]) => {
+                const subjectProgress = progress.subjects[subjectName];
+                return (
+                  <div 
+                    key={subjectName} 
+                    className="group cursor-pointer"
+                    onClick={() => setSelectedSubject(subjectName)}
+                  >
+                    <div className="bg-gray-800 hover:bg-gray-700 transition-all duration-300 p-6 rounded-xl relative overflow-hidden">
+                      {/* Background Gradient */}
+                      <div className={`absolute inset-0 bg-gradient-to-br ${subject.color} opacity-20 group-hover:opacity-30 transition-opacity duration-300`}></div>
+                      
+                      {/* Content */}
+                      <div className="relative z-10">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <h3 className="font-bold text-lg text-white mb-2 group-hover:text-green-400 transition-colors">
+                              {subjectName}
+                            </h3>
+                            <div className="flex items-center space-x-2 mb-2">
+                              <span className={`text-sm font-medium ${getWeightageColor(subject.weightage)}`}>
+                                {subject.weightage} marks
+                              </span>
+                              <span className="text-xs text-gray-400">•</span>
+                              <span className="text-xs text-gray-400">{subject.concepts.length} topics</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-white">{subjectProgress.percentage}%</div>
+                          </div>
+                        </div>
+                        
+                        {/* Progress Bar */}
+                        <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
+                          <div 
+                            className="bg-green-500 h-2 rounded-full transition-all duration-500" 
+                            style={{ width: `${subjectProgress.percentage}%` }}
+                          ></div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-400">{subjectProgress.completed}/{subjectProgress.total} completed</span>
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <Play className="w-5 h-5 text-green-400" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
       </div>
     </div>
   );
+
+  // Playlist view (like Spotify playlist)
+  const PlaylistView = () => {
+    const subject = subjects[selectedSubject];
+    const subjectProgress = progress.subjects[selectedSubject];
+    
+    return (
+      <div className="min-h-screen bg-black text-white">
+        {/* Header */}
+        <div className="relative">
+          <div className={`bg-gradient-to-b ${subject.color} px-8 py-12`}>
+            <button 
+              onClick={() => setSelectedSubject(null)}
+              className="mb-6 flex items-center text-white hover:text-gray-200 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5 mr-2" />
+              Back to Library
+            </button>
+            
+            <div className="flex items-end space-x-6">
+              <div className="w-48 h-48 bg-black bg-opacity-30 rounded-lg flex items-center justify-center">
+                <Music className="w-20 h-20 text-white opacity-80" />
+              </div>
+              <div>
+                <p className="text-sm font-medium uppercase tracking-wider opacity-90">Study Playlist</p>
+                <h1 className="text-5xl font-bold mb-4">{selectedSubject}</h1>
+                <div className="flex items-center space-x-4 text-sm">
+                  <span>{subject.concepts.length} topics</span>
+                  <span>•</span>
+                  <span>{subjectProgress.completed} completed</span>
+                  <span>•</span>
+                  <span className="font-medium">{subject.weightage} marks</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Gradient Overlay */}
+          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black to-transparent"></div>
+        </div>
+
+        {/* Playlist Content */}
+        <div className="px-8 py-6">
+          {/* Play Button */}
+          <div className="mb-8">
+            <button className="bg-green-500 hover:bg-green-400 text-black px-8 py-3 rounded-full font-bold transition-colors flex items-center">
+              <Play className="w-5 h-5 mr-2" />
+              Start Studying
+            </button>
+          </div>
+
+          {/* Track List */}
+          <div className="space-y-2">
+            {subject.concepts.map((concept, index) => {
+              const conceptId = `${selectedSubject}-${index}`;
+              const isCompleted = completedConcepts.has(conceptId);
+              const isEditingThis = editingNote === conceptId;
+              const hasNote = notes[conceptId] && notes[conceptId].length > 0;
+
+              return (
+                <div key={index} className="group hover:bg-gray-800 rounded-lg p-3 transition-colors">
+                  <div className="flex items-center space-x-4">
+                    {/* Track Number / Play Button */}
+                    <div className="w-8 text-center">
+                      <span className="text-gray-400 group-hover:hidden text-sm">
+                        {String(index + 1).padStart(2, '0')}
+                      </span>
+                      <button 
+                        onClick={() => toggleConcept(selectedSubject, index)}
+                        className="hidden group-hover:block"
+                      >
+                        {isCompleted ? 
+                          <CheckSquare className="w-5 h-5 text-green-500" /> :
+                          <Square className="w-5 h-5 text-gray-400 hover:text-white" />
+                        }
+                      </button>
+                    </div>
+
+                    {/* Track Info */}
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3">
+                        <span className={`font-medium ${isCompleted ? 'text-green-400 line-through' : 'text-white'}`}>
+                          {concept}
+                        </span>
+                        {hasNote && (
+                          <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                        )}
+                      </div>
+                      {hasNote && !isEditingThis && (
+                        <div className="mt-2 text-sm text-gray-400 bg-gray-800 p-3 rounded">
+                          {notes[conceptId]}
+                        </div>
+                      )}
+                      {isEditingThis && (
+                        <div className="mt-2 space-y-2">
+                          <textarea
+                            value={tempNote}
+                            onChange={(e) => setTempNote(e.target.value)}
+                            className="w-full p-3 bg-gray-700 text-white rounded resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+                            rows={3}
+                            placeholder="Add your study notes..."
+                          />
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => saveNote(selectedSubject, index)}
+                              className="flex items-center px-3 py-1 bg-green-500 text-black rounded text-sm hover:bg-green-400"
+                            >
+                              <Save className="w-3 h-3 mr-1" />
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEditingNote}
+                              className="flex items-center px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-500"
+                            >
+                              <X className="w-3 h-3 mr-1" />
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => startEditingNote(selectedSubject, index)}
+                        className={`p-2 rounded hover:bg-gray-700 ${hasNote ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
+                        title={hasNote ? 'Edit note' : 'Add note'}
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return selectedSubject ? <PlaylistView /> : <MainView />;
 };
 
 export default GateTracker;

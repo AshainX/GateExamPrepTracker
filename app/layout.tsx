@@ -4,8 +4,8 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'GATE CSE 2026 Preparation Tracker',
-  description: 'Track your GATE CSE preparation progress',
+  title: 'Target GATE CSE 2026 Prepration Tracker',
+  description: 'Kan re pila GATE crack koribu ta!!',
 }
 
 export default function RootLayout({
