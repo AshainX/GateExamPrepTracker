@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { CheckSquare, Square, BookOpen, Target, Calendar, TrendingUp, Edit3, Save, X, Play, Pause, ArrowLeft, Music } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
@@ -13,207 +13,15 @@ const GateTracker = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [syncPending, setSyncPending] = useState(false);
+  
+  // Add ref for textarea to maintain focus
+  const textareaRef = useRef(null);
 
-  // User ID (in real app, this would come from authentication)
   const userId = 'demo-user';
 
-  // TypeScript interface for subject data
-  interface SubjectData {
-    completed: number;
-    total: number;
-    percentage: number;
-    weightage: number;
-  }
-
-  // Helper function to check if object has weightage property
-  const hasWeightage = (obj: unknown): obj is SubjectData => {
-    return typeof obj === 'object' && obj !== null && 'weightage' in obj;
-  };
-
-  // Local Storage functions
-  const saveToLocalStorage = (data) => {
-    try {
-      localStorage.setItem('gateTracker-cache', JSON.stringify({
-        ...data,
-        timestamp: Date.now()
-      }));
-    } catch (error) {
-      console.warn('Failed to save to localStorage:', error);
-    }
-  };
-
-  const loadFromLocalStorage = () => {
-    try {
-      const cached = localStorage.getItem('gateTracker-cache');
-      if (cached) {
-        const data = JSON.parse(cached);
-        if (Date.now() - data.timestamp < 5 * 60 * 1000) {
-          return data;
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to load from localStorage:', error);
-    }
-    return null;
-  };
-
-  // Online/Offline detection
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    
-    setIsOnline(navigator.onLine);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Load data with caching
-  useEffect(() => {
-    const cachedData = loadFromLocalStorage();
-    if (cachedData) {
-      setCompletedConcepts(new Set(cachedData.completedConcepts || []));
-      setNotes(cachedData.notes || {});
-      setIsLoading(false);
-    }
-
-    loadProgress();
-    
-    const unsubscribe = onSnapshot(doc(db, 'users', userId), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        const newData = {
-          completedConcepts: data.completedConcepts || [],
-          notes: data.notes || {}
-        };
-        
-        setCompletedConcepts(new Set(newData.completedConcepts));
-        setNotes(newData.notes);
-        saveToLocalStorage(newData);
-      }
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Load progress from Firestore
-  const loadProgress = async () => {
-    if (!isOnline) return;
-    
-    try {
-      const docRef = doc(db, 'users', userId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const newData = {
-          completedConcepts: data.completedConcepts || [],
-          notes: data.notes || {}
-        };
-        setCompletedConcepts(new Set(newData.completedConcepts));
-        setNotes(newData.notes);
-        saveToLocalStorage(newData);
-      }
-    } catch (error) {
-      console.error('Error loading progress:', error);
-    }
-  };
-
-  const saveProgress = async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
-    const optimizedData = {
-      completedConcepts: Array.from(newCompletedConcepts),
-      notes: Object.fromEntries(
-        Object.entries(newNotes).filter(([, value]) => 
-          typeof value === 'string' && value.trim() !== ''
-        )
-      ),
-      lastUpdated: new Date(),
-      totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
-      completedCount: newCompletedConcepts.size
-    };
-    
-    saveToLocalStorage(optimizedData);
-    
-    if (!isOnline) {
-      console.log('Offline - data saved locally');
-      return;
-    }
-    
-    try {
-      setIsSaving(true);
-      await setDoc(doc(db, 'users', userId), optimizedData, { merge: true });
-    } catch (error) {
-      console.error('Error saving to Firebase:', error);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Auto-save logic
-  useEffect(() => {
-    if (!isLoading && (completedConcepts.size > 0 || Object.keys(notes).length > 0)) {
-      if (editingNote !== null) {
-        return;
-      }
-      
-      const timeoutId = setTimeout(() => {
-        saveProgress();
-      }, 3000);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [completedConcepts, notes, isLoading, editingNote]);
-
-  const toggleConcept = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    const newCompleted = new Set(completedConcepts);
-    
-    if (newCompleted.has(conceptId)) {
-      newCompleted.delete(conceptId);
-    } else {
-      newCompleted.add(conceptId);
-    }
-    
-    setCompletedConcepts(newCompleted);
-  };
-
-  const saveNote = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    const newNotes = { ...notes };
-    newNotes[conceptId] = tempNote;
-    setNotes(newNotes);
-    setEditingNote(null);
-    setTempNote('');
-  };
-
-  const startEditingNote = (subjectName, conceptIndex) => {
-    const conceptId = `${subjectName}-${conceptIndex}`;
-    setEditingNote(conceptId);
-    setTempNote(notes[conceptId] || '');
-  };
-
-  const cancelEditingNote = () => {
-    setEditingNote(null);
-    setTempNote('');
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
-          <p className="text-white">Loading your study playlists...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const subjects = {
+  // Memoized subjects data to prevent re-renders
+  const subjects = useMemo(() => ({
     'Programming & Data Structures': {
       weightage: 11.5,
       priority: 'Very High',
@@ -671,12 +479,266 @@ const GateTracker = () => {
         'Memory Organization and Management'
       ]
     }
-  };
+  }), []);
 
-  const calculateProgress = () => {
+  // FIXED: Improved debounced save function with longer delay
+  const debouncedSave = useCallback(
+    (() => {
+      let timeoutId;
+      return (newCompletedConcepts, newNotes) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          saveProgress(newCompletedConcepts, newNotes);
+        }, 2000); // Increased to 2 seconds to prevent interference during typing
+      };
+    })(),
+    []
+  );
+
+  // Local Storage functions - optimized
+  const saveToLocalStorage = useCallback((data) => {
+    try {
+      const cacheData = {
+        ...data,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('gateTracker-cache', JSON.stringify(cacheData));
+    } catch (error) {
+      console.warn('Failed to save to localStorage:', error);
+    }
+  }, []);
+
+  const loadFromLocalStorage = useCallback(() => {
+    try {
+      const cached = localStorage.getItem('gateTracker-cache');
+      if (cached) {
+        const data = JSON.parse(cached);
+        // Cache valid for 10 minutes
+        if (Date.now() - data.timestamp < 10 * 60 * 1000) {
+          return data;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load from localStorage:', error);
+    }
+    return null;
+  }, []);
+
+  // Online/Offline detection
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      // Sync when coming back online
+      if (syncPending) {
+        saveProgress();
+        setSyncPending(false);
+      }
+    };
+    const handleOffline = () => setIsOnline(false);
+    
+    setIsOnline(navigator.onLine);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [syncPending]);
+
+  // FIXED: Load initial data - optimized with better editing state handling
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadData = async () => {
+      // First, load from cache for instant UI
+      const cachedData = loadFromLocalStorage();
+      if (cachedData && isMounted) {
+        setCompletedConcepts(new Set(cachedData.completedConcepts || []));
+        setNotes(cachedData.notes || {});
+        setIsLoading(false);
+      }
+
+      // Then load from Firebase
+      if (isOnline) {
+        try {
+          const docRef = doc(db, 'users', userId);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists() && isMounted) {
+            const data = docSnap.data();
+            const newCompletedConcepts = new Set(data.completedConcepts || []);
+            const newNotes = data.notes || {};
+            
+            setCompletedConcepts(newCompletedConcepts);
+            setNotes(newNotes);
+            saveToLocalStorage({ completedConcepts: data.completedConcepts || [], notes: newNotes });
+          }
+        } catch (error) {
+          console.error('Error loading from Firebase:', error);
+        }
+      }
+      
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+
+    // FIXED: Real-time listener - prevented updates during editing
+    let unsubscribe = () => {};
+    if (isOnline) {
+      unsubscribe = onSnapshot(doc(db, 'users', userId), (doc) => {
+        if (doc.exists() && isMounted && editingNote === null) { // Only update when not editing
+          const data = doc.data();
+          const newCompletedConcepts = new Set(data.completedConcepts || []);
+          const newNotes = data.notes || {};
+          
+          setCompletedConcepts(newCompletedConcepts);
+          setNotes(newNotes);
+          saveToLocalStorage({ completedConcepts: data.completedConcepts || [], notes: newNotes });
+        }
+      });
+    }
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [isOnline, loadFromLocalStorage, saveToLocalStorage, editingNote]);
+
+  // Optimized save function with better error handling
+  const saveProgress = useCallback(async (newCompletedConcepts = completedConcepts, newNotes = notes) => {
+    const optimizedData = {
+      completedConcepts: Array.from(newCompletedConcepts),
+      notes: Object.fromEntries(
+        Object.entries(newNotes).filter(([, value]) => 
+          typeof value === 'string' && value.trim() !== ''
+        )
+      ),
+      lastUpdated: new Date().toISOString(),
+      totalConcepts: Object.values(subjects).reduce((sum, subject) => sum + subject.concepts.length, 0),
+      completedCount: newCompletedConcepts.size
+    };
+    
+    // Always save to local storage first
+    saveToLocalStorage(optimizedData);
+    
+    if (!isOnline) {
+      setSyncPending(true);
+      console.log('Offline - data saved locally, will sync when online');
+      return;
+    }
+    
+    try {
+      setIsSaving(true);
+      await setDoc(doc(db, 'users', userId), optimizedData, { merge: true });
+      setSyncPending(false);
+    } catch (error) {
+      console.error('Error saving to Firebase:', error);
+      setSyncPending(true);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [completedConcepts, notes, subjects, isOnline, saveToLocalStorage]);
+
+  // Optimized toggle function
+  const toggleConcept = useCallback((subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    
+    setCompletedConcepts(prevCompleted => {
+      const newCompleted = new Set(prevCompleted);
+      
+      if (newCompleted.has(conceptId)) {
+        newCompleted.delete(conceptId);
+      } else {
+        newCompleted.add(conceptId);
+      }
+      
+      // Immediate local storage save and debounced Firebase save
+      const currentNotes = notes;
+      saveToLocalStorage({
+        completedConcepts: Array.from(newCompleted),
+        notes: currentNotes
+      });
+      debouncedSave(newCompleted, currentNotes);
+      
+      return newCompleted;
+    });
+  }, [notes, saveToLocalStorage, debouncedSave]);
+
+  // FIXED: Note saving with proper focus handling
+  const saveNote = useCallback((subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    // Get the actual value from the textarea ref instead of state
+    const actualValue = textareaRef.current ? textareaRef.current.value : tempNote;
+    const newNotes = { ...notes, [conceptId]: actualValue };
+    
+    setNotes(newNotes);
+    setEditingNote(null);
+    setTempNote('');
+    
+    // Immediate save without affecting textarea focus
+    saveToLocalStorage({
+      completedConcepts: Array.from(completedConcepts),
+      notes: newNotes
+    });
+    debouncedSave(completedConcepts, newNotes);
+  }, [notes, tempNote, completedConcepts, saveToLocalStorage, debouncedSave]);
+
+  // FIXED: Start editing with proper focus management
+  const startEditingNote = useCallback((subjectName, conceptIndex) => {
+    const conceptId = `${subjectName}-${conceptIndex}`;
+    setEditingNote(conceptId);
+    setTempNote(notes[conceptId] || '');
+    
+    // Focus textarea after state updates
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        // Set cursor to end of text
+        const length = textareaRef.current.value.length;
+        textareaRef.current.setSelectionRange(length, length);
+      }
+    }, 0);
+  }, [notes]);
+
+  const cancelEditingNote = useCallback(() => {
+    setEditingNote(null);
+    setTempNote('');
+  }, []);
+
+  // FIXED: Handle textarea input with robust cursor position preservation
+  const handleTempNoteChange = useCallback((e) => {
+    const textarea = e.target;
+    const { value, selectionStart, selectionEnd } = textarea;
+    
+    // Store cursor position before state update
+    const cursorPosition = selectionStart;
+    
+    setTempNote(value);
+    
+    // Use multiple methods to ensure cursor position is preserved
+    setTimeout(() => {
+      if (textarea && textarea === document.activeElement) {
+        textarea.setSelectionRange(cursorPosition, cursorPosition);
+        textarea.focus();
+      }
+    }, 0);
+    
+    requestAnimationFrame(() => {
+      if (textarea && textarea === document.activeElement) {
+        textarea.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    });
+  }, []);
+
+  // Memoized progress calculation
+  const progress = useMemo(() => {
     let totalConcepts = 0;
     let completedCount = 0;
-    let subjectProgress = {};
+    const subjectProgress = {};
 
     Object.entries(subjects).forEach(([subjectName, subject]) => {
       const subjectTotal = subject.concepts.length;
@@ -705,16 +767,26 @@ const GateTracker = () => {
       totalCompleted: completedCount,
       totalConcepts: totalConcepts
     };
-  };
+  }, [completedConcepts, subjects]);
 
-  const progress = calculateProgress();
-
-  const getWeightageColor = (weightage) => {
+  const getWeightageColor = useCallback((weightage) => {
     if (weightage >= 10) return 'text-red-400';
     if (weightage >= 8) return 'text-orange-400';
     if (weightage >= 6) return 'text-yellow-400';
     return 'text-green-400';
-  };
+  }, []);
+
+  // Simplified loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+          <p className="text-white">Loading your study playlists...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Main grid view (like Spotify home)
   const MainView = () => (
@@ -724,7 +796,7 @@ const GateTracker = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
-              Prepration Tracker - GATE 2026 !!
+              Preparation Tracker - GATE 2026 !!
             </h1>
             <p className="text-gray-400 mt-1">Sabubele 6 Ghanta de bujhilu!!</p>
           </div>
@@ -733,7 +805,7 @@ const GateTracker = () => {
               {!isOnline ? (
                 <div className="flex items-center text-red-400">
                   <div className="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
-                  Offline
+                  Offline {syncPending && '(Sync Pending)'}
                 </div>
               ) : isSaving ? (
                 <div className="flex items-center text-yellow-400">
@@ -946,23 +1018,36 @@ const GateTracker = () => {
                       {isEditingThis && (
                         <div className="mt-2 space-y-2">
                           <textarea
-                            value={tempNote}
-                            onChange={(e) => setTempNote(e.target.value)}
+                            ref={textareaRef}
+                            defaultValue={tempNote}
                             className="w-full p-3 bg-gray-700 text-white rounded resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
                             rows={3}
                             placeholder="Add your study notes..."
+                            onKeyDown={(e) => {
+                              // Prevent parent handlers from interfering
+                              e.stopPropagation();
+                              // Save on Ctrl+Enter
+                              if (e.ctrlKey && e.key === 'Enter') {
+                                saveNote(selectedSubject, index);
+                              }
+                              // Cancel on Escape
+                              if (e.key === 'Escape') {
+                                cancelEditingNote();
+                              }
+                            }}
+                            autoFocus
                           />
                           <div className="flex space-x-2">
                             <button
                               onClick={() => saveNote(selectedSubject, index)}
-                              className="flex items-center px-3 py-1 bg-green-500 text-black rounded text-sm hover:bg-green-400"
+                              className="flex items-center px-3 py-1 bg-green-500 text-black rounded text-sm hover:bg-green-400 transition-colors"
                             >
                               <Save className="w-3 h-3 mr-1" />
                               Save
                             </button>
                             <button
                               onClick={cancelEditingNote}
-                              className="flex items-center px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-500"
+                              className="flex items-center px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-500 transition-colors"
                             >
                               <X className="w-3 h-3 mr-1" />
                               Cancel
@@ -975,8 +1060,11 @@ const GateTracker = () => {
                     {/* Actions */}
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={() => startEditingNote(selectedSubject, index)}
-                        className={`p-2 rounded hover:bg-gray-700 ${hasNote ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditingNote(selectedSubject, index);
+                        }}
+                        className={`p-2 rounded hover:bg-gray-700 transition-colors ${hasNote ? 'text-blue-400' : 'text-gray-400 hover:text-white'}`}
                         title={hasNote ? 'Edit note' : 'Add note'}
                       >
                         <Edit3 className="w-4 h-4" />
