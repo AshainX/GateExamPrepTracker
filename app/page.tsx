@@ -794,7 +794,9 @@ const GateTracker = () => {
   const targetDate = new Date('2026-02-01T00:00:00+05:30'); // Update as needed
   const now = new Date();
   const msPerDay = 1000 * 60 * 60 * 24;
-  const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / msPerDay));
+  const daysRemaining = Math.max(0, Math.ceil((targetDate.getTime() - now.getTime()) / msPerDay));
+                                                                                  
+
 
 
 const MainView = () => (
