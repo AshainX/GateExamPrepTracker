@@ -481,6 +481,8 @@ const GateTracker = () => {
     }
   }), []);
 
+  
+
   // FIXED: Improved debounced save function with longer delay
   const debouncedSave = useCallback(
     (() => {
@@ -788,140 +790,147 @@ const GateTracker = () => {
     );
   }
 
-  // Main grid view (like Spotify home)
-  const MainView = () => (
-    <div className="min-h-screen bg-black text-white">
-      {/* Top Header */}
-      <div className="sticky top-0 bg-black bg-opacity-90 backdrop-blur-md z-10 px-8 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
-              Preparation Tracker - GATE 2026 !!
-            </h1>
-            <p className="text-gray-400 mt-1">Sabubele 6 Ghanta de bujhilu!!</p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="text-sm">
-              {!isOnline ? (
-                <div className="flex items-center text-red-400">
-                  <div className="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
-                  Offline {syncPending && '(Sync Pending)'}
-                </div>
-              ) : isSaving ? (
-                <div className="flex items-center text-yellow-400">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400 mr-2"></div>
-                  Syncing...
-                </div>
-              ) : (
-                <div className="flex items-center text-green-400">
-                  <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
-                  Synced
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+    // Calculate days left for Feb 2026 GATE exam
+  const targetDate = new Date('2026-02-01T00:00:00+05:30'); // Update as needed
+  const now = new Date();
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysRemaining = Math.max(0, Math.ceil((targetDate - now) / msPerDay));
 
-      {/* Overall Stats */}
-      <div className="px-8 py-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-6 rounded-xl">
-            <div className="flex items-center mb-2">
-              <Target className="w-6 h-6 mr-2" />
-              <span className="font-medium">Overall Progress</span>
-            </div>
-            <div className="text-3xl font-bold">{progress.overall}%</div>
-            <div className="text-sm opacity-90">{progress.totalCompleted}/{progress.totalConcepts} concepts mastered</div>
-          </div>
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 rounded-xl">
-            <div className="flex items-center mb-2">
-              <Calendar className="w-6 h-6 mr-2" />
-              <span className="font-medium">Target Date</span>
-            </div>
-            <div className="text-2xl font-bold">Feb 2026</div>
-            <div className="text-sm opacity-90">197 days remaining</div>
-          </div>
-          <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 rounded-xl">
-            <div className="flex items-center mb-2">
-              <TrendingUp className="w-6 h-6 mr-2" />
-              <span className="font-medium">Target Score</span>
-            </div>
-            <div className="text-2xl font-bold">90+ marks</div>
-            <div className="text-sm opacity-90">AIR 1-500</div>
-          </div>
-          <div className="bg-gradient-to-r from-orange-600 to-red-600 p-6 rounded-xl">
-            <div className="flex items-center mb-2">
-              <Music className="w-6 h-6 mr-2" />
-              <span className="font-medium">Study Sessions</span>
-            </div>
-            <div className="text-2xl font-bold">{Object.keys(subjects).length}</div>
-            <div className="text-sm opacity-90">Subject playlists</div>
-          </div>
-        </div>
 
-        {/* Subject Grid */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold mb-6 text-white">Your Study Playlists</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {Object.entries(subjects)
-              .sort((a, b) => b[1].weightage - a[1].weightage)
-              .map(([subjectName, subject]) => {
-                const subjectProgress = progress.subjects[subjectName];
-                return (
-                  <div 
-                    key={subjectName} 
-                    className="group cursor-pointer"
-                    onClick={() => setSelectedSubject(subjectName)}
-                  >
-                    <div className="bg-gray-800 hover:bg-gray-700 transition-all duration-300 p-6 rounded-xl relative overflow-hidden">
-                      {/* Background Gradient */}
-                      <div className={`absolute inset-0 bg-gradient-to-br ${subject.color} opacity-20 group-hover:opacity-30 transition-opacity duration-300`}></div>
-                      
-                      {/* Content */}
-                      <div className="relative z-10">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex-1">
-                            <h3 className="font-bold text-lg text-white mb-2 group-hover:text-green-400 transition-colors">
-                              {subjectName}
-                            </h3>
-                            <div className="flex items-center space-x-2 mb-2">
-                              <span className={`text-sm font-medium ${getWeightageColor(subject.weightage)}`}>
-                                {subject.weightage} marks
-                              </span>
-                              <span className="text-xs text-gray-400">•</span>
-                              <span className="text-xs text-gray-400">{subject.concepts.length} topics</span>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-2xl font-bold text-white">{subjectProgress.percentage}%</div>
-                          </div>
-                        </div>
-                        
-                        {/* Progress Bar */}
-                        <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
-                          <div 
-                            className="bg-green-500 h-2 rounded-full transition-all duration-500" 
-                            style={{ width: `${subjectProgress.percentage}%` }}
-                          ></div>
-                        </div>
-                        
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-400">{subjectProgress.completed}/{subjectProgress.total} completed</span>
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                            <Play className="w-5 h-5 text-green-400" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+const MainView = () => (
+  <div className="min-h-screen bg-black text-white">
+    {/* Top Header */}
+    <div className="sticky top-0 bg-black bg-opacity-90 backdrop-blur-md z-10 px-8 py-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
+            Preparation Tracker - GATE 2026 !!
+          </h1>
+          <p className="text-gray-400 mt-1">Sabubele 6 Ghanta de bujhilu!!</p>
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="text-sm">
+            {!isOnline ? (
+              <div className="flex items-center text-red-400">
+                <div className="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
+                Offline {syncPending && '(Sync Pending)'}
+              </div>
+            ) : isSaving ? (
+              <div className="flex items-center text-yellow-400">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400 mr-2"></div>
+                Syncing...
+              </div>
+            ) : (
+              <div className="flex items-center text-green-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                Synced
+              </div>
+            )}
           </div>
         </div>
       </div>
     </div>
-  );
+
+    {/* Overall Stats */}
+    <div className="px-8 py-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-gradient-to-r from-green-600 to-teal-600 p-6 rounded-xl">
+          <div className="flex items-center mb-2">
+            <Target className="w-6 h-6 mr-2" />
+            <span className="font-medium">Overall Progress</span>
+          </div>
+          <div className="text-3xl font-bold">{progress.overall}%</div>
+          <div className="text-sm opacity-90">{progress.totalCompleted}/{progress.totalConcepts} concepts mastered</div>
+        </div>
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 rounded-xl">
+          <div className="flex items-center mb-2">
+            <Calendar className="w-6 h-6 mr-2" />
+            <span className="font-medium">Target Date</span>
+          </div>
+          <div className="text-2xl font-bold">Feb 2026</div>
+          <div className="text-sm opacity-90">{daysRemaining} days remaining</div>
+        </div>
+        <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 rounded-xl">
+          <div className="flex items-center mb-2">
+            <TrendingUp className="w-6 h-6 mr-2" />
+            <span className="font-medium">Target Score</span>
+          </div>
+          <div className="text-2xl font-bold">90+ marks</div>
+          <div className="text-sm opacity-90">AIR 1-500</div>
+        </div>
+        <div className="bg-gradient-to-r from-orange-600 to-red-600 p-6 rounded-xl">
+          <div className="flex items-center mb-2">
+            <Music className="w-6 h-6 mr-2" />
+            <span className="font-medium">Study Sessions</span>
+          </div>
+          <div className="text-2xl font-bold">{Object.keys(subjects).length}</div>
+          <div className="text-sm opacity-90">Subject playlists</div>
+        </div>
+      </div>
+
+      {/* Subject Grid - ADD THIS SECTION */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold mb-6 text-white">Your Study Playlists</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {Object.entries(subjects)
+            .sort((a, b) => b[1].weightage - a[1].weightage)
+            .map(([subjectName, subject]) => {
+              const subjectProgress = progress.subjects[subjectName];
+              return (
+                <div 
+                  key={subjectName} 
+                  className="group cursor-pointer"
+                  onClick={() => setSelectedSubject(subjectName)}
+                >
+                  <div className="bg-gray-800 hover:bg-gray-700 transition-all duration-300 p-6 rounded-xl relative overflow-hidden">
+                    {/* Background Gradient */}
+                    <div className={`absolute inset-0 bg-gradient-to-br ${subject.color} opacity-20 group-hover:opacity-30 transition-opacity duration-300`}></div>
+                    
+                    {/* Content */}
+                    <div className="relative z-10">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <h3 className="font-bold text-lg text-white mb-2 group-hover:text-green-400 transition-colors">
+                            {subjectName}
+                          </h3>
+                          <div className="flex items-center space-x-2 mb-2">
+                            <span className={`text-sm font-medium ${getWeightageColor(subject.weightage)}`}>
+                              {subject.weightage} marks
+                            </span>
+                            <span className="text-xs text-gray-400">•</span>
+                            <span className="text-xs text-gray-400">{subject.concepts.length} topics</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-white">{subjectProgress.percentage}%</div>
+                        </div>
+                      </div>
+                      
+                      {/* Progress Bar */}
+                      <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
+                        <div 
+                          className="bg-green-500 h-2 rounded-full transition-all duration-500" 
+                          style={{ width: `${subjectProgress.percentage}%` }}
+                        ></div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">{subjectProgress.completed}/{subjectProgress.total} completed</span>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                          <Play className="w-5 h-5 text-green-400" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 
   // Playlist view (like Spotify playlist)
   const PlaylistView = () => {
